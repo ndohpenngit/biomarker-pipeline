@@ -1,0 +1,133 @@
+/*-- custom.scss --*/
+/* Biomarker Pipeline — Clinical Trial Report Theme */
+
+/* ── Colour palette ────────────────────────────────────────────────────────── */
+$trial-blue:     #2C5F8A;
+$trial-blue-lt:  #8BBCCC;
+$trial-orange:   #E07B54;
+$trial-teal:     #1F7A72;
+$trial-bg:       #F8FAFB;
+$code-bg:        #F0F4F8;
+$border-colour:  #DEE5ED;
+
+/* ── Typography ────────────────────────────────────────────────────────────── */
+$font-family-sans-serif: "Inter", "Helvetica Neue", Arial, sans-serif;
+$font-family-monospace:  "JetBrains Mono", "Fira Code", "Courier New", monospace;
+$font-size-root:         15px;
+$line-height-base:       1.65;
+
+/* ── Body & layout ─────────────────────────────────────────────────────────── */
+body {
+  background-color: $trial-bg;
+  color: #1A2733;
+}
+
+/* ── Headings ───────────────────────────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-weight: 700;
+  color: $trial-blue;
+}
+
+h1.title {
+  font-size: 2rem;
+  border-bottom: 3px solid $trial-orange;
+  padding-bottom: 0.4rem;
+}
+
+h2.subtitle {
+  font-weight: 400;
+  color: lighten($trial-blue, 25%);
+  font-size: 1.15rem;
+}
+
+/* ── Section headings ───────────────────────────────────────────────────────── */
+.quarto-section-identifier {
+  color: $trial-orange;
+}
+
+/* ── TOC sidebar ────────────────────────────────────────────────────────────── */
+#quarto-sidebar {
+  background: #FFFFFF;
+  border-right: 1px solid $border-colour;
+}
+
+.sidebar nav[role="doc-toc"] ul > li > a {
+  color: $trial-blue;
+  font-size: 0.82rem;
+}
+
+.sidebar nav[role="doc-toc"] ul > li > a.active {
+  font-weight: 700;
+  border-left: 3px solid $trial-orange;
+  padding-left: 8px;
+}
+
+/* ── Code blocks ────────────────────────────────────────────────────────────── */
+pre.sourceCode {
+  background: $code-bg;
+  border-left: 4px solid $trial-blue-lt;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+code.sourceCode {
+  font-size: 0.82rem;
+}
+
+/* ── Callout overrides ──────────────────────────────────────────────────────── */
+.callout-note {
+  border-left-color: $trial-blue;
+}
+
+.callout-tip {
+  border-left-color: $trial-teal;
+}
+
+.callout-important {
+  border-left-color: $trial-orange;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────────── */
+table {
+  font-size: 0.88rem;
+}
+
+table th {
+  background-color: $trial-blue !important;
+  color: white !important;
+}
+
+table.table-striped tbody tr:nth-of-type(odd) {
+  background-color: lighten($trial-blue, 55%);
+}
+
+/* ── Figure captions ────────────────────────────────────────────────────────── */
+figcaption {
+  font-size: 0.83rem;
+  color: #5A6878;
+  text-align: center;
+  margin-top: 0.3rem;
+}
+
+/* ── Abstract / executive summary box ──────────────────────────────────────── */
+.unnumbered + p {
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────────── */
+.quarto-footer {
+  border-top: 1px solid $border-colour;
+  padding-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #8899AA;
+}
+
+/* ── Smooth scrolling & anchor links ───────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+a.anchor-section {
+  color: $trial-blue-lt;
+}

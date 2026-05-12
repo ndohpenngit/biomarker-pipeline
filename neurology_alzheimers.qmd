@@ -1,0 +1,59 @@
+---
+title: "Biomarker Data Science Pipeline"
+subtitle: "Neurology · Anti-Amyloid mAb (lecanemab-like) · Early Alzheimer's Disease"
+params:
+  ta:                "Neurology"
+  disease:           "Early Alzheimer's Disease (MCI / mild dementia)"
+  mechanism:         "Anti-Aβ protofibril mAb (lecanemab-like / LEQEMBI)"
+  drug_class:        "Anti-Amyloid mAb"
+  protocol:          "NEURO-AD-004"
+  primary_biomarker: "pTau181"
+  accent_colour:     "#6C3483"
+  seed:              789
+  n_patients:        160
+---
+
+# Executive Summary {.unnumbered}
+
+This report analyses simulated Phase III trial data for an **anti-amyloid monoclonal antibody** (lecanemab-like / LEQEMBI) in **early Alzheimer's disease**. Lecanemab targets soluble amyloid-β protofibrils — the toxic intermediate species upstream of plaque formation. The analysis integrates:
+
+1. **Multi-omics** — neuroinflammatory transcriptomics and Olink neurology panel proteomics (primary readout: plasma p-tau181 NPX, a fluid biomarker of AD pathology)
+2. **Longitudinal & survival** — lme4 modelling of cognitive decline trajectory (CDR-SB), Emax amyloid clearance PD, Kaplan–Meier time-to-progression, Cox PH
+3. **ML pipeline** — patient stratification by biomarker profile, UMAP of CSF/plasma proteome, elastic-net + random forest prediction of 18-month clinical responders
+
+---
+
+# Background & Objectives
+
+## Scientific Rationale
+
+The amyloid cascade hypothesis posits that accumulation of amyloid-β (Aβ) — initially as soluble oligomers and protofibrils, then as insoluble plaques — triggers downstream tau hyperphosphorylation, neurofibrillary tangle formation, neuroinflammation, synaptic loss, and ultimately neurodegeneration. Lecanemab (BAN2401) preferentially binds soluble Aβ protofibrils, removing toxic species before plaque consolidation.
+
+**Fluid biomarker landscape in Alzheimer's disease:**
+
+| Biomarker | Matrix | Biological meaning | Direction in AD |
+|---|---|---|---|
+| Aβ42/40 ratio | CSF / plasma | Amyloid plaque burden | ↓ (sequestered in plaques) |
+| p-tau181 / p-tau217 | CSF / plasma | Tau phosphorylation; AD-specific | ↑ |
+| Total tau (t-tau) | CSF | Neurodegeneration / axonal damage | ↑ |
+| NfL (neurofilament light) | CSF / plasma | Non-specific neurodegeneration | ↑ |
+| GFAP (glial fibrillary acidic protein) | CSF / plasma | Astrocyte activation | ↑ |
+
+**Key trial design elements:**
+
+- Population: Amyloid-positive (PET or CSF) early AD (MCI or mild dementia; CDR 0.5–1)
+- Primary endpoint: CDR-SB change from baseline at 18 months
+- Key secondary: Amyloid PET centiloid change; Aβ42/40 ratio normalisation
+- Safety: ARIA-E and ARIA-H monitoring (amyloid-related imaging abnormalities)
+- LEQEMBI CLARITY AD (Phase III): 27% slowing of CDR-SB decline vs placebo
+
+## Study Objectives
+
+- Identify baseline plasma proteomic profiles (p-tau181, Aβ42/40, NfL, GFAP) that predict cognitive response at 18 months
+- Quantify p-tau181 NPX dynamics under anti-amyloid therapy using an Emax amyloid-clearing PD framework
+- Characterise time-to-clinical-progression (CDR-SB worsening ≥ 1 point) differences between biomarker-stratified patient clusters
+- Build a baseline multi-omics classifier combining neuroinflammatory transcriptomics and CSF/plasma proteomics for responder enrichment
+
+---
+
+{{< include _analysis_core.qmd >}}

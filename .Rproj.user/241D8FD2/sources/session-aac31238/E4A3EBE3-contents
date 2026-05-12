@@ -1,0 +1,95 @@
+---
+title: "Biomarker Data Science Platform"
+subtitle: "End-to-End Clinical Trial Biomarker Pipelines across Therapeutic Areas"
+toc: false
+number-sections: false
+---
+
+This platform hosts reproducible, modular biomarker analysis reports spanning four therapeutic areas. Each report applies an identical analytical pipeline — multi-omics profiling, longitudinal modelling, survival analysis, and machine learning — to simulated Phase II trial data, with disease-specific biological framing and clinical interpretation.
+
+---
+
+## Pipeline Architecture
+
+All reports share a common three-stage analytical framework:
+
+| Stage | Methods |
+|---|---|
+| **Multi-Omics** | Transcriptomics QC & batch correction, Welch DE (BH-FDR), Olink NPX proteomics, cross-modal correlation |
+| **Longitudinal & Survival** | Linear mixed-effects (lme4), Emax PD model (nls), Kaplan–Meier, Cox proportional-hazards |
+| **Machine Learning** | PCA + UMAP, k-means clustering, elastic-net (glmnet), random forest + OOB AUROC |
+
+---
+
+## Therapeutic Area Reports
+
+:::: {.columns}
+
+::: {.column width="48%"}
+### [Immunology · FcRn Inhibitor](autoimmune_fcrn.qmd)
+**Disease:** Generalised Myasthenia Gravis  
+**Mechanism:** FcRn-mediated IgG catabolism (VYVGART-like)  
+**Primary biomarker:** IgG total NPX  
+**Seed / N:** 237 / 120 patients
+:::
+
+::: {.column width="4%"}
+:::
+
+::: {.column width="48%"}
+### [Oncology · Checkpoint Inhibitor](oncology_checkpoint.qmd)
+**Disease:** Non-Small Cell Lung Cancer (NSCLC)  
+**Mechanism:** PD-1 blockade — T-cell reinvigoration (nivolumab-like)  
+**Primary biomarker:** Tumour Mutational Burden (TMB)  
+**Seed / N:** 123 / 150 patients
+:::
+
+::::
+
+:::: {.columns}
+
+::: {.column width="48%"}
+### [Cardiovascular · PCSK9 Inhibitor](cardiovascular_pcsk9.qmd)
+**Disease:** Heterozygous Familial Hypercholesterolaemia (HeFH)  
+**Mechanism:** PCSK9 inhibition — LDL-R upregulation (evolocumab-like)  
+**Primary biomarker:** LDL Cholesterol (LDL-C)  
+**Seed / N:** 456 / 200 patients
+:::
+
+::: {.column width="4%"}
+:::
+
+::: {.column width="48%"}
+### [Neurology · Anti-Amyloid](neurology_alzheimers.qmd)
+**Disease:** Early Alzheimer's Disease  
+**Mechanism:** Anti-Aβ monoclonal antibody (lecanemab-like)  
+**Primary biomarker:** Plasma p-tau181  
+**Seed / N:** 789 / 160 patients
+:::
+
+::::
+
+---
+
+## R Package Stack
+
+```r
+install.packages(c(
+  # Core tidyverse
+  "dplyr", "tidyr", "purrr", "tibble", "ggplot2", "patchwork",
+  # Statistics
+  "lme4", "lmerTest", "survival", "broom", "broom.mixed",
+  # Genomics
+  "limma", "SummarizedExperiment",
+  # ML
+  "glmnet", "randomForest", "cluster", "pROC", "umap",
+  # Reporting
+  "knitr", "kableExtra", "sessioninfo",
+  # Optional
+  "survminer", "forcats", "ggrepel", "pheatmap"
+))
+```
+
+---
+
+*Built with [Quarto](https://quarto.org) · Rendered `r format(Sys.time(), "%d %B %Y")`*

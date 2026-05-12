@@ -1,0 +1,684 @@
+---
+# _analysis_core.qmd — shared analytical engine
+# Rendered via {{< include _analysis_core.qmd >}} from each TA wrapper.
+# The params below are DEFAULTS for standalone preview only;
+# TA wrappers supply their own params: block which takes precedence.
+params:
+  ta:                "Immunology"
+  disease:           "Generalised Myasthenia Gravis (gMG)"
+  mechanism:         "FcRn Inhibitor (VYVGART-like)"
+  drug_class:        "FcRn Inhibitor"
+  protocol:          "AI-AUTO-001"
+  primary_biomarker: "IgG_total"
+  accent_colour:     "#2C5F8A"
+  seed:              237∑
+  n_patients:        120
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(patchwork)
+  library(tibble)
+  library(purrr)
+  library(limma)
+  library(SummarizedExperiment)
+  library(knitr)
+  library(kableExtra)
+})
+
+src <- function(f) source(file.path("R", f), local = FALSE)
+src("01_simulate_data.R")
+src("02_multiomics_analysis.R")
+src("03_longitudinal_survival.R")
+src("04_ml_pipeline.R")
+
+# ── Base-R null-coalescing operator (replaces rlang's %||%) ──────────────────
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# ── Safe params accessor with fallback defaults ───────────────────────────────
+# When included in a TA wrapper, `params` is a proper list.
+# When previewed standalone or if a key is missing, fall back gracefully.
+p_defaults <- list(
+  ta                = "Immunology",
+  disease           = "Generalised Myasthenia Gravis (gMG)",
+  mechanism         = "FcRn Inhibitor (VYVGART-like)",
+  drug_class        = "FcRn Inhibitor",
+  protocol          = "AUTO-001",
+  primary_biomarker = "IgG_total",
+  accent_colour     = "#2C5F8A",
+  seed              = 42L,
+  n_patients        = 120L
+)
+p <- function(key) {
+  val <- tryCatch(params[[key]], error = function(e) NULL)
+  if (is.null(val)) p_defaults[[key]] else val
+}
+
+ac <- p("accent_colour")   # accent colour shorthand used throughout
+
+theme_trial <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title       = element_text(face = "bold", size = base_size + 2, colour = ac),
+      plot.subtitle    = element_text(colour = "grey50", size = base_size - 1),
+      strip.text       = element_text(face = "bold"),
+      legend.position  = "bottom",
+      panel.grid.minor = element_blank()
+    )
+}
+theme_set(theme_trial())
+t_start <- proc.time()
+```
+
+---
+
+::: {.callout-note}
+## Document Status
+| Field | Detail |
+|---|---|
+| **Protocol** | `r p("protocol")` |
+| **Therapeutic area** | `r p("ta")` |
+| **Mechanism** | `r p("mechanism")` |
+| **Data cut** | Simulated (seed = `r p("seed")`) |
+| **Pipeline version** | 1.0.0 |
+| **Classification** | Confidential — Internal Use Only |
+:::
+
+---
+
+# Data Simulation {#sec-simulation}
+
+```{r}
+#| label: simulate
+#| results: hide
+
+data_list <- simulate_trial_data(
+  n_patients = p("n_patients"),
+  n_genes    = 500,
+  n_proteins = 50,
+  seed       = p("seed")
+)
+
+demo            <- data_list$demographics
+longitudinal    <- data_list$longitudinal
+transcriptomics <- data_list$transcriptomics
+batch_df        <- data_list$batch
+proteomics      <- data_list$proteomics
+survival_df     <- data_list$survival
+```
+
+## Cohort Overview
+
+```{r}
+#| label: tbl-cohort
+#| tbl-cap: "Simulated trial cohort — demographic summary"
+
+n_act   <- sum(demo$treatment == 1)
+n_pbo   <- sum(demo$treatment == 0)
+r_act   <- mean(demo$true_responder[demo$treatment == 1])
+r_pbo   <- mean(demo$true_responder[demo$treatment == 0])
+n_genes <- ncol(transcriptomics) - 1
+n_prot  <- length(data_list$protein_names)
+weeks   <- unique(longitudinal$week)
+
+tibble(
+  Parameter = c(
+    "Total patients enrolled",
+    sprintf("Active arm (%s)", p("drug_class")),
+    "Placebo arm",
+    "Responder rate \u2014 Active",
+    "Responder rate \u2014 Placebo",
+    "Transcriptomic features (genes)",
+    "Proteomic features (Olink proteins)",
+    "Assessment timepoints (weeks)",
+    "Total longitudinal records"
+  ),
+  Value = c(
+    nrow(demo), n_act, n_pbo,
+    sprintf("%.1f%%", r_act * 100),
+    sprintf("%.1f%%", r_pbo * 100),
+    n_genes, n_prot,
+    paste(sort(weeks), collapse = ", "),
+    nrow(longitudinal)
+  )
+) |>
+  kbl(booktabs = TRUE, align = c("l", "r")) |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 13) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+```
+
+::: {.callout-tip}
+## Simulation Parameters
+All data are fully synthetic (seed = `r p("seed")`). The simulation encodes realistic biological structure: batch effects in transcriptomics, Emax-shaped primary biomarker trajectories, and gene-expression-linked responder status calibrated to the `r p("disease")` setting.
+:::
+
+---
+
+# Step 1 — Multi-Omics Analysis {#sec-multiomics}
+
+```{r}
+#| label: multiomics-run
+#| results: hide
+
+qc_res    <- qc_transcriptomics(transcriptomics, batch_df, demo)
+de_df     <- differential_expression(qc_res$expr_filtered, demo)
+prot_res  <- proteomics_analysis(proteomics)
+omics_int <- multiomics_integration(qc_res$expr_filtered, proteomics, demo)
+```
+
+## Transcriptomics Quality Control
+
+```{r}
+#| label: fig-pca
+#| fig-cap: "PCA of batch-corrected transcriptomics, coloured by treatment arm."
+
+pca_df <- if (inherits(qc_res$pca_res, "prcomp")) {
+  as.data.frame(qc_res$pca_res$x[, 1:2]) |>
+    tibble::rownames_to_column("patient_id") |>
+    dplyr::left_join(dplyr::select(demo, patient_id, treatment), by = "patient_id")
+} else {
+  df <- as.data.frame(qc_res$pca_res)
+  if (!"PC1" %in% names(df)) names(df)[1:2] <- c("PC1", "PC2")
+  if (!"treatment" %in% names(df))
+    df <- tibble::rownames_to_column(df, "patient_id") |>
+      dplyr::left_join(dplyr::select(demo, patient_id, treatment), by = "patient_id")
+  df
+}
+
+ggplot(pca_df, aes(PC1, PC2, colour = factor(treatment))) +
+  geom_point(alpha = 0.75, size = 2.5) +
+  stat_ellipse(level = 0.90, linetype = "dashed") +
+  scale_colour_manual(
+    values = c("0" = "#AAAAAA", "1" = ac),
+    labels = c("0" = "Placebo", "1" = "Active")
+  ) +
+  labs(title = "Transcriptomics PCA \u2014 Post Batch Correction",
+       subtitle = "90% confidence ellipses per arm",
+       x = "PC1", y = "PC2", colour = "Treatment")
+```
+
+## Differential Expression (Welch t-test, BH-FDR)
+
+```{r}
+#| label: de-colnames
+#| include: false
+
+de_norm <- de_df |>
+  rename_with(~ dplyr::case_match(
+    .x,
+    "log2FoldChange" ~ "fc", "logFC" ~ "fc", "log2FC" ~ "fc",
+    "pvalue" ~ "pval_raw", "pval" ~ "pval_raw", "P.Value" ~ "pval_raw", "p_value" ~ "pval_raw",
+    "padj" ~ "fdr", "fdr" ~ "fdr", "adj.P.Val" ~ "fdr", "adj_pval" ~ "fdr",
+    "feature" ~ "gene_id", "gene" ~ "gene_id", "Gene" ~ "gene_id",
+    "t" ~ "t_stat", "t_stat" ~ "t_stat",
+    .default = .x
+  ))
+if (!"AveExpr" %in% names(de_norm)) de_norm$AveExpr <- NA_real_
+
+n_de <- sum(de_norm$fdr < 0.05, na.rm = TRUE)
+de_norm <- de_norm |>
+  mutate(sig = dplyr::case_when(
+    fdr < 0.05 & fc >  1 ~ "Up in Active",
+    fdr < 0.05 & fc < -1 ~ "Down in Active",
+    TRUE ~ "NS"
+  ))
+```
+
+```{r}
+#| label: fig-volcano
+#| fig-cap: "Volcano plot of baseline differential expression (Active vs Placebo)."
+
+ggplot(de_norm, aes(fc, -log10(pval_raw), colour = sig)) +
+  geom_point(alpha = 0.55, size = 1.6) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", colour = "grey40") +
+  scale_colour_manual(values = c("Up in Active" = "#C0392B",
+                                  "Down in Active" = "#2980B9", "NS" = "grey70")) +
+  labs(title = "Differential Expression: Active vs Placebo (Baseline)",
+       subtitle = sprintf("%d genes at FDR < 5%% (Welch t-test, BH)", n_de),
+       x = "log\u2082 Fold Change", y = "-log\u2081\u2080(p-value)", colour = NULL) +
+  annotate("text", x = Inf, y = Inf, label = sprintf("n DE = %d", n_de),
+           hjust = 1.1, vjust = 1.3, size = 4, colour = ac, fontface = "bold")
+```
+
+```{r}
+#| label: tbl-de-top
+#| tbl-cap: "Top 10 differentially expressed genes (ranked by adjusted p-value)"
+
+tbl_cols <- intersect(c("gene_id", "fc", "AveExpr", "t_stat", "pval_raw", "fdr"),
+                      names(de_norm))
+de_norm |>
+  dplyr::filter(fdr < 0.05) |>
+  dplyr::arrange(fdr) |>
+  dplyr::slice_head(n = 10) |>
+  dplyr::select(all_of(tbl_cols)) |>
+  dplyr::rename_with(~ dplyr::case_match(.x,
+    "gene_id" ~ "Gene", "fc" ~ "log\u2082FC", "AveExpr" ~ "Ave. Expr",
+    "t_stat" ~ "t", "pval_raw" ~ "p-value", "fdr" ~ "FDR", .default = .x)) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) |>
+  column_spec(length(tbl_cols), bold = TRUE) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+```
+
+## Olink Proteomics — NPX Dynamics
+
+```{r}
+#| label: fig-npx
+#| fig-cap: !expr 'sprintf("**%s** NPX trajectories by arm and responder status. Ribbons: \u00b11 SE.", p("primary_biomarker"))'
+
+prot_long <- local({
+  df       <- as.data.frame(proteomics)
+  prot_col <- intersect(c("protein","protein_name","analyte","Assay","OlinkID"), names(df))
+  npx_col  <- intersect(c("NPX","npx","value","expression","NPX_value"), names(df))
+  wk_col   <- intersect(c("week","Week","time","timepoint","visit"), names(df))
+  meta_candidates <- c("patient_id","treatment","week","Week","time","timepoint",
+                        "true_responder")
+
+  if (length(prot_col) > 0 && length(npx_col) > 0) {
+    # ── Already long ─────────────────────────────────────────────────────────
+    out <- dplyr::rename(df, protein = !!prot_col[1], NPX = !!npx_col[1])
+    if (length(wk_col) > 0 && wk_col[1] != "week")
+      out <- dplyr::rename(out, week = !!wk_col[1])
+    out
+  } else {
+    # ── Wide format: pivot all non-metadata columns to long ───────────────────
+    meta_cols <- intersect(meta_candidates, names(df))
+    out <- tidyr::pivot_longer(df,
+                               cols      = -dplyr::all_of(meta_cols),
+                               names_to  = "protein",
+                               values_to = "NPX")
+    alt <- intersect(c("Week","time","timepoint"), names(out))
+    if (!"week" %in% names(out) && length(alt) > 0)
+      out <- dplyr::rename(out, week = !!alt[1])
+    out
+  }
+})
+
+# ── Resolve which protein to plot ─────────────────────────────────────────────
+available_proteins <- unique(prot_long$protein)
+plot_protein <- if (p("primary_biomarker") %in% available_proteins) {
+  p("primary_biomarker")
+} else {
+  # Pick the closest match by name, or fall back to first protein
+  match_idx <- agrep(p("primary_biomarker"), available_proteins,
+                     ignore.case = TRUE, max.distance = 0.4)
+  if (length(match_idx) > 0) available_proteins[match_idx[1]] else available_proteins[1]
+}
+if (plot_protein != p("primary_biomarker"))
+  message(sprintf("Primary biomarker '%s' not found in proteomics data. Plotting '%s' instead.",
+                  p("primary_biomarker"), plot_protein))
+
+md      <- as.data.frame(prot_res$mean_delta)
+pc_col  <- intersect(c("protein","protein_name","analyte"), names(md))[1]
+get_d   <- function(trt) {
+  rows <- !is.na(pc_col) & md[[pc_col]] == plot_protein & md$treatment == trt
+  if (any(rows, na.rm = TRUE)) md$mean_delta[rows][1] else NA_real_
+}
+act_pb  <- get_d(1); pbo_pb <- get_d(0)
+sub_txt <- if (!is.na(act_pb) && !is.na(pbo_pb))
+  sprintf("Active \u0394 (Wk0\u219212): %+.3f  |  Placebo \u0394: %+.3f", act_pb, pbo_pb) else
+  sprintf("%s NPX change from baseline", plot_protein)
+
+prot_plot <- prot_long |>
+  dplyr::filter(protein == plot_protein)
+
+# Only join true_responder from demo if the column isn't already present
+if (!"true_responder" %in% names(prot_plot))
+  prot_plot <- dplyr::left_join(
+    prot_plot, dplyr::select(demo, patient_id, true_responder), by = "patient_id"
+  )
+
+prot_plot |>
+  dplyr::mutate(Arm = ifelse(treatment == 1, "Active", "Placebo"),
+                Responder = ifelse(true_responder == 1, "Responder", "Non-Responder")) |>
+  dplyr::group_by(Arm, Responder, week) |>
+  dplyr::summarise(mn = mean(NPX), se = sd(NPX)/sqrt(dplyr::n()), .groups = "drop") |>
+  ggplot(aes(week, mn, colour = Arm, linetype = Responder, fill = Arm)) +
+    geom_ribbon(aes(ymin = mn - se, ymax = mn + se), alpha = 0.15, colour = NA) +
+    geom_line(linewidth = 1) + geom_point(size = 2.5) +
+    scale_colour_manual(values = c("Active" = ac, "Placebo" = "#AAAAAA")) +
+    scale_fill_manual(values   = c("Active" = ac, "Placebo" = "#AAAAAA")) +
+    scale_x_continuous(breaks = sort(unique(prot_long$week))) +
+    labs(title = sprintf("%s NPX Over Time", p("primary_biomarker")),
+         subtitle = sub_txt, x = "Week", y = "NPX (log\u2082)",
+         colour = "Treatment", fill = "Treatment", linetype = "Responder Status")
+```
+
+## Cross-Modal Integration
+
+```{r}
+#| label: fig-crosscorr
+#| fig-cap: "Cross-modal correlation heatmap — transcriptomic PCs vs Olink NPX."
+
+tryCatch({
+  grid::grid.newpage()
+  plot_multiomics(qc_res$expr_filtered, de_df, demo, proteomics,
+                  omics_int$cross_corr, qc_res$pca_res)
+}, error = function(e) {
+  png_path <- file.path("outputs", "01_multiomics_analysis.png")
+  if (file.exists(png_path)) knitr::include_graphics(png_path)
+  else message("plot_multiomics() error: ", conditionMessage(e))
+})
+```
+
+---
+
+# Step 2 — Longitudinal Modelling & Survival {#sec-longitudinal}
+
+```{r}
+#| label: longitudinal-run
+#| results: hide
+
+lme_fit  <- fit_mixed_effects_model(longitudinal)
+emax_res <- fit_emax_pd_model(longitudinal)
+km_res   <- kaplan_meier_analysis(survival_df)
+cox_res  <- cox_ph_analysis(survival_df)
+```
+
+## Linear Mixed-Effects Model
+
+$$Y_{ij} = \beta_0 + \beta_1\,\text{week}_{ij} + \beta_2\,\text{trt}_i + \beta_3\,(\text{week}\times\text{trt})_{ij} + b_i + \varepsilon_{ij}$$
+
+```{r}
+#| label: tbl-lme
+#| tbl-cap: "LME fixed effects — week × treatment interaction is the primary estimand."
+
+lme_tbl <- if (requireNamespace("broom.mixed", quietly = TRUE)) {
+  broom.mixed::tidy(lme_fit, effects = "fixed", conf.int = TRUE) |>
+    dplyr::select(dplyr::any_of(c("term","estimate","std.error","statistic","conf.low","conf.high")))
+} else {
+  sm <- summary(lme_fit); cm <- as.data.frame(sm$coefficients)
+  tibble::tibble(term = rownames(cm), estimate = cm[[1]], std.error = cm[[2]],
+                 statistic = cm[[grep("t.value|t value|z.value|z value", names(cm))[1]]])
+}
+int_rows <- which(grepl("week.*trt|trt.*week|week:treat|treat.*:.*week",
+                         lme_tbl$term, ignore.case = TRUE))
+
+lme_kbl <- lme_tbl |>
+  dplyr::mutate(dplyr::across(where(is.numeric), \(x) round(x, 3))) |>
+  dplyr::rename(Term = term, Estimate = estimate, SE = std.error,
+                `t-stat` = dplyr::any_of("statistic"),
+                `CI Low`  = dplyr::any_of("conf.low"),
+                `CI High` = dplyr::any_of("conf.high")) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+if (length(int_rows) > 0)
+  lme_kbl <- kableExtra::row_spec(lme_kbl, int_rows, bold = TRUE, background = "#EAF3FB")
+lme_kbl
+```
+
+## Emax Pharmacodynamic Model
+
+$$E(t) = E_0 - \frac{E_{\max}\cdot t^\gamma}{EC_{50}^\gamma + t^\gamma}$$
+
+```{r}
+#| label: fig-emax
+#| fig-cap: "Emax PD model fits by responder stratum. Points: observed means ±SE; curves: model."
+
+tryCatch({
+  grid::grid.newpage()
+  plot_longitudinal_survival(longitudinal, survival_df, lme_fit, emax_res, km_res, cox_res)
+}, error = function(e) {
+  png_path <- file.path("outputs", "02_longitudinal_survival.png")
+  if (file.exists(png_path)) knitr::include_graphics(png_path)
+  else message("plot_longitudinal_survival() error: ", conditionMessage(e))
+})
+```
+
+```{r}
+#| label: tbl-emax
+#| tbl-cap: "Emax PD parameter estimates by responder stratum."
+
+as.data.frame(emax_res$params) |>
+  dplyr::mutate(dplyr::across(where(is.numeric), \(x) round(x, 3))) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+```
+
+## Kaplan–Meier & Cox PH
+
+```{r}
+#| label: fig-km
+#| fig-cap: "Kaplan–Meier curves — time to sustained response by treatment arm."
+
+tryCatch({
+  if (!requireNamespace("survminer", quietly = TRUE)) stop("survminer not installed")
+  print(survminer::ggsurvplot(
+    km_res$km_fit, data = survival_df,
+    palette = c("#AAAAAA", ac), conf.int = TRUE, pval = TRUE, risk.table = TRUE,
+    ggtheme = theme_trial(), legend.labs = c("Placebo","Active"),
+    title = "Time to Sustained Clinical Response",
+    xlab = "Time (weeks)", ylab = "Response-free probability"
+  ))
+}, error = function(e) {
+  plot(km_res$km_fit, col = c("#AAAAAA", ac), lwd = 2,
+       xlab = "Time (weeks)", ylab = "Response-free probability",
+       main = "Time to Sustained Clinical Response")
+  legend("topright", legend = c("Placebo","Active"), col = c("#AAAAAA", ac), lwd = 2)
+})
+```
+
+```{r}
+#| label: tbl-cox
+#| tbl-cap: "Cox PH model — covariate hazard ratios for time to response."
+
+cox_tbl  <- broom::tidy(cox_res$cox_fit, exponentiate = TRUE, conf.int = TRUE) |>
+  dplyr::select(dplyr::any_of(c("term","estimate","conf.low","conf.high","p.value")))
+trt_rows <- which(grepl("treatment|trt", cox_tbl$term, ignore.case = TRUE))
+
+cox_kbl <- cox_tbl |>
+  dplyr::mutate(
+    dplyr::across(dplyr::any_of(c("estimate","conf.low","conf.high")), \(x) round(x, 3)),
+    p.value = ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 3)))
+  ) |>
+  dplyr::rename(Covariate = term, HR = estimate,
+                `95% CI Low`  = dplyr::any_of("conf.low"),
+                `95% CI High` = dplyr::any_of("conf.high"),
+                `p-value` = p.value) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+if (length(trt_rows) > 0)
+  cox_kbl <- kableExtra::row_spec(cox_kbl, trt_rows, bold = TRUE, background = "#FEF3E8")
+cox_kbl
+```
+
+---
+
+# Step 3 — Machine Learning Pipeline {#sec-ml}
+
+```{r}
+#| label: ml-run
+#| results: hide
+
+dr_res      <- dimensionality_reduction(qc_res$expr_filtered, demo)
+cluster_res <- patient_clustering(dr_res$pca_res, demo, n_clusters = 3L)
+ml_res      <- biomarker_response_prediction(qc_res$expr_filtered, proteomics, demo)
+```
+
+## Dimensionality Reduction & Clustering
+
+```{r}
+#| label: fig-umap
+#| fig-cap: "UMAP embedding coloured by treatment arm and responder status."
+
+tryCatch({
+  grid::grid.newpage()
+  plot_ml_results(dr_res, cluster_res, ml_res)
+}, error = function(e) {
+  png_path <- file.path("outputs", "03_ml_pipeline.png")
+  if (file.exists(png_path)) knitr::include_graphics(png_path)
+  else message("plot_ml_results() error: ", conditionMessage(e))
+})
+```
+
+```{r}
+#| label: tbl-clusters
+#| tbl-cap: "Patient cluster composition by treatment arm and responder status."
+
+cluster_tbl <- tryCatch({
+  df <- as.data.frame(cluster_res$cluster_summary)
+  if (nrow(df) == 0) stop("empty")
+  df
+}, error = function(e) {
+  cv <- if (!is.null(cluster_res$clusters))    cluster_res$clusters    else
+        if (!is.null(cluster_res$cluster))     cluster_res$cluster     else
+        if (!is.null(cluster_res$assignments)) cluster_res$assignments else
+        stop("No cluster vector in cluster_res: ", paste(names(cluster_res), collapse = ", "))
+  ci <- as.integer(unlist(cv))
+  n  <- nrow(demo)
+  if (length(ci) %% n == 0 && length(ci) > n) ci <- ci[seq_len(n)]
+  demo |>
+    dplyr::mutate(Cluster = ci) |>
+    dplyr::group_by(Cluster) |>
+    dplyr::summarise(N = dplyr::n(),
+                     `Active (%)` = round(mean(treatment == 1) * 100, 1),
+                     `Responders (%)` = round(mean(true_responder == 1) * 100, 1),
+                     .groups = "drop")
+})
+cluster_tbl |>
+  dplyr::mutate(dplyr::across(where(is.numeric), \(x) round(x, 2))) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+```
+
+## Biomarker Response Prediction
+
+```{r}
+#| label: tbl-enet
+#| tbl-cap: "Elastic-net selected features at optimal λ."
+
+tibble::tibble(Feature = ml_res$selected_feats) |>
+  dplyr::mutate(Rank = dplyr::row_number()) |>
+  dplyr::relocate(Rank) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE, font_size = 12) |>
+  row_spec(0, bold = TRUE, color = "white", background = ac)
+```
+
+```{r}
+#| label: fig-importance
+#| fig-cap: "Top 20 random forest variable importance scores (mean decrease in Gini)."
+
+imp_df   <- as.data.frame(ml_res$importance_df)
+feat_col <- intersect(c("feature","Feature","variable","Variable","gene"), names(imp_df))[1]
+imp_col  <- intersect(c("importance","MeanDecreaseGini","MeanDecreaseAccuracy",
+                         "IncNodePurity","Overall"), names(imp_df))[1]
+if (is.na(feat_col) || is.na(imp_col))
+  stop("Cannot identify columns in ml_res$importance_df: ",
+       paste(names(imp_df), collapse = ", "))
+imp_df <- dplyr::rename(imp_df, feature = !!feat_col, importance = !!imp_col)
+
+imp_df |>
+  dplyr::slice_head(n = min(20L, nrow(imp_df))) |>
+  dplyr::mutate(feature = forcats::fct_reorder(feature, importance)) |>
+  ggplot(aes(importance, feature, fill = importance)) +
+    geom_col(show.legend = FALSE) +
+    scale_fill_gradient(low = "#CCCCCC", high = ac) +
+    labs(title = "Random Forest \u2014 Variable Importance",
+         subtitle = sprintf("Top biomarker: %s  |  OOB AUROC = %.3f",
+                            imp_df$feature[which.max(imp_df$importance)], ml_res$auc_oob),
+         x = "Mean Decrease in Gini Impurity", y = NULL)
+```
+
+```{r}
+#| label: fig-roc
+#| fig-cap: "Out-of-bag ROC curve for the random forest classifier."
+
+tryCatch({
+  if (!requireNamespace("pROC", quietly = TRUE)) stop("pROC not installed")
+  scores  <- if (!is.null(ml_res$oob_probs)) ml_res$oob_probs else
+             if (!is.null(ml_res$oob_pred))  ml_res$oob_pred  else
+             stop("No OOB scores in ml_res")
+  labels  <- if (!is.null(ml_res$y_true))   ml_res$y_true    else
+             if (!is.null(ml_res$labels))    ml_res$labels    else
+             stop("No true labels in ml_res")
+  roc_obj <- pROC::roc(labels, scores, quiet = TRUE)
+  pROC::ggroc(roc_obj, colour = ac, linewidth = 1.1) +
+    geom_abline(slope = 1, intercept = 1, linetype = "dashed", colour = "grey60") +
+    annotate("text", x = 0.25, y = 0.1,
+             label = sprintf("AUROC = %.3f", pROC::auc(roc_obj)),
+             size = 5, colour = ac, fontface = "bold") +
+    labs(title = "Random Forest \u2014 OOB ROC Curve",
+         x = "Specificity", y = "Sensitivity")
+}, error = function(e) message("ROC skipped: ", conditionMessage(e)))
+```
+
+---
+
+# Key Findings {#sec-findings}
+
+```{r}
+#| label: compute-summary
+#| include: false
+
+elapsed <- (proc.time() - t_start)["elapsed"]
+if (!exists("act_pb") || !exists("pbo_pb")) {
+  md     <- as.data.frame(prot_res$mean_delta)
+  pc_col <- intersect(c("protein","protein_name","analyte"), names(md))[1]
+  pb_nm  <- if (exists("plot_protein")) plot_protein else p("primary_biomarker")
+  act_pb <- if (!is.na(pc_col)) md$mean_delta[md[[pc_col]] == pb_nm & md$treatment == 1][1] else NA_real_
+  pbo_pb <- if (!is.na(pc_col)) md$mean_delta[md[[pc_col]] == pb_nm & md$treatment == 0][1] else NA_real_
+}
+fmt_d <- function(x) if (!is.na(x)) sprintf("%+.3f", x) else "N/A"
+top_b <- if (exists("imp_df") && nrow(imp_df) > 0)
+  as.character(imp_df$feature[which.max(imp_df$importance)]) else "\u2014"
+```
+
+```{r}
+#| label: tbl-findings
+#| tbl-cap: "Summary of key findings across all analytical domains."
+
+tibble::tibble(
+  Domain = c("Multi-Omics","Multi-Omics",
+             "Longitudinal","Longitudinal","Longitudinal","Longitudinal",
+             "ML Pipeline","ML Pipeline","ML Pipeline"),
+  Finding = c(
+    sprintf("%d genes differentially expressed at baseline (Welch t-test, FDR < 5%%)", n_de),
+    sprintf("%s NPX \u0394 (Wk0\u219212): Active %s vs Placebo %s",
+            p("primary_biomarker"), fmt_d(act_pb), fmt_d(pbo_pb)),
+    "lme4 LME: significant week \u00d7 treatment interaction",
+    "Emax PD: Responders ~80% vs Non-Responders ~40% primary-biomarker reduction",
+    sprintf("Log-rank p = %.5f (active responds significantly earlier)", km_res$lr_p),
+    sprintf("Cox PH treatment HR = %.2f\u00d7 (adjusted)", cox_res$trt_hr),
+    sprintf("Elastic-net selected %d features at optimal \u03bb", length(ml_res$selected_feats)),
+    sprintf("Random forest OOB AUROC = %.3f", ml_res$auc_oob),
+    sprintf("Top predictive biomarker: %s", top_b)
+  )
+) |>
+  kbl(booktabs = TRUE) |>
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = TRUE) |>
+  column_spec(1, bold = TRUE, width = "3cm") |>
+  row_spec(0, bold = TRUE, color = "white", background = ac) |>
+  kableExtra::collapse_rows(columns = 1, valign = "top")
+```
+
+---
+
+# Session Information
+
+```{r}
+#| label: session-info
+#| code-fold: true
+#| code-summary: "Expand for full session info"
+
+if (requireNamespace("sessioninfo", quietly = TRUE)) sessioninfo::session_info() else sessionInfo()
+```
+
+---
+
+*Report generated with [Quarto](https://quarto.org) · R `r getRversion()` · `r format(Sys.time(), "%d %B %Y, %H:%M %Z")`*

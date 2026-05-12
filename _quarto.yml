@@ -1,0 +1,67 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - index.qmd
+    - autoimmune_fcrn.qmd
+    - oncology_checkpoint.qmd
+    - cardiovascular_pcsk9.qmd
+    - neurology_alzheimers.qmd
+
+website:
+  title: "Biomarker Data Science Platform"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - text: "Therapeutic Areas"
+        menu:
+          - href: autoimmune_fcrn.qmd
+            text: "Immunology · FcRn Inhibitor"
+          - href: oncology_checkpoint.qmd
+            text: "Oncology · Checkpoint Inhibitor"
+          - href: cardiovascular_pcsk9.qmd
+            text: "Cardiovascular · PCSK9 Inhibitor"
+          - href: neurology_alzheimers.qmd
+            text: "Neurology · Anti-Amyloid"
+    right:
+      - icon: github
+        href: https://github.com
+
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
+    code-line-numbers: true
+    highlight-style: github
+    fig-align: center
+    fig-width: 10
+    fig-height: 6
+    fig-dpi: 150
+    smooth-scroll: true
+    anchor-sections: true
+    callout-appearance: minimal
+    grid:
+      sidebar-width: 260px
+      body-width: 900px
+
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+
+knitr:
+  opts_chunk:
+    comment: "#>"
+    out.width: "100%"
+    R.options:
+      width: 90

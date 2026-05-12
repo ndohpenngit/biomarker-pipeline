@@ -1,0 +1,57 @@
+---
+title: "Biomarker Data Science Pipeline"
+subtitle: "Oncology · PD-1 Checkpoint Inhibitor (nivolumab-like) · NSCLC"
+params:
+  ta:                "Oncology"
+  disease:           "Non-Small Cell Lung Cancer (NSCLC)"
+  mechanism:         "PD-1 Checkpoint Inhibitor (nivolumab-like)"
+  drug_class:        "Anti-PD-1 mAb"
+  protocol:          "ONC-IO-002"
+  primary_biomarker: "TMB"
+  accent_colour:     "#922B21"
+  seed:              123
+  n_patients:        150
+---
+
+# Executive Summary {.unnumbered}
+
+This report analyses simulated Phase II trial data for a **PD-1 checkpoint inhibitor** (nivolumab-like) in **advanced NSCLC**. Immune checkpoint blockade (ICB) reinvigorates exhausted tumour-infiltrating T cells, restoring anti-tumour immunity. Response is heterogeneous and biomarker-driven — making this an ideal setting for multi-omics biomarker discovery. Three analytical streams are applied:
+
+1. **Multi-omics** — tumour transcriptomics (immune gene signatures) and Olink immune proteomics (primary readout: tumour mutational burden proxy via TMB)
+2. **Longitudinal & survival** — lme4 modelling of immune cell dynamics, Emax PD modelling, Kaplan–Meier PFS, Cox PH
+3. **ML pipeline** — UMAP of immune phenotypes, k-means patient stratification, elastic-net + random forest ORR prediction
+
+---
+
+# Background & Objectives
+
+## Scientific Rationale
+
+PD-1 (programmed cell death protein 1) is an inhibitory receptor expressed on activated T cells. Tumour cells exploit the PD-1/PD-L1 axis to evade immune surveillance. Anti-PD-1 monoclonal antibodies (nivolumab, pembrolizumab) block this interaction, restoring cytotoxic T-lymphocyte activity against tumour antigens.
+
+**Key predictive biomarkers in NSCLC:**
+
+| Biomarker | Platform | Clinical use |
+|---|---|---|
+| PD-L1 IHC (TPS/CPS) | Immunohistochemistry | Pembrolizumab eligibility threshold |
+| TMB (tumour mutational burden) | Whole exome / panel sequencing | Higher TMB → more neoantigens → higher ORR |
+| MSI/dMMR | IHC / PCR | Pan-cancer pembrolizumab approval |
+| ctDNA dynamics | Liquid biopsy | Early response / resistance monitoring |
+| CD8+ TIL density | IHC / deconvolution | Inflamed vs excluded vs desert phenotype |
+
+**Tumour immune microenvironment (TIME) phenotypes:**
+
+- **Inflamed (T-cell rich):** High CD8, PD-L1+, responsive to ICB
+- **Immune excluded:** T cells at tumour margins; stromal barriers (TGF-β, VEGF)
+- **Immune desert:** Low TIL density; primary resistance; requires combination strategies
+
+## Study Objectives
+
+- Identify baseline transcriptomic immune signatures (inflamed vs excluded vs desert) associated with objective response
+- Characterise TMB and Olink cytokine/immune protein dynamics during ICB treatment
+- Quantify progression-free survival (PFS) differences between biomarker-high and biomarker-low patients
+- Build a multi-feature ML classifier combining TMB, PD-L1 proxies, and immune gene expression for ORR prediction
+
+---
+
+{{< include _analysis_core.qmd >}}

@@ -200,7 +200,7 @@
     "href": "index.html#pipeline-architecture",
     "title": "Biomarker Data Science Platform",
     "section": "Pipeline Architecture",
-    "text": "Pipeline Architecture\nAll reports share a common three-stage analytical framework executed from a single parameterised source file (_analysis_core.qmd):\n\n\n\n\n\n\n\nStage\nMethods\n\n\n\n\nMulti-Omics\nTranscriptomics QC & batch correction · Welch DE (BH-FDR) · Olink NPX proteomics · cross-modal correlation\n\n\nLongitudinal & Survival\nLinear mixed-effects (lme4) · Emax PD model (nls) · Kaplan–Meier · Cox proportional-hazards\n\n\nMachine Learning\nPCA + UMAP · k-means clustering · elastic-net (glmnet) · random forest + OOB AUROC\n\n\n\n\nBuilt with Quarto · R r getRversion() · r format(Sys.time(), \"%d %B %Y\")"
+    "text": "Pipeline Architecture\nAll reports share a common three-stage analytical framework executed from a single parameterised source file (_analysis_core.qmd):\n\n\n\n\n\n\n\nStage\nMethods\n\n\n\n\nMulti-Omics\nTranscriptomics QC & batch correction · Welch DE (BH-FDR) · Olink NPX proteomics · cross-modal correlation\n\n\nLongitudinal & Survival\nLinear mixed-effects (lme4) · Emax PD model (nls) · Kaplan–Meier · Cox proportional-hazards\n\n\nMachine Learning\nPCA + UMAP · k-means clustering · elastic-net (glmnet) · random forest + OOB AUROC\n\n\n\n\nBuilt with Quarto · R 4.4.2 · 13 May 2026"
   },
   {
     "objectID": "autoimmune_fcrn.html",

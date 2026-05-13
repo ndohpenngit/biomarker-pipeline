@@ -1,176 +1,123 @@
-# Biomarker Data Science Pipeline (R)
-### End-to-End Autoimmune Trial Biomarker Analysis · FcRn Inhibitor (VYVGART-like)
+# Biomarker Data Science Platform
+
+End-to-end clinical trial biomarker analysis pipelines across four therapeutic areas, built in R and published as a Quarto website.
+
+**Live site →** `https://ndohpenngit.github.io/biomarker-pipeline/`
 
 ---
 
-## Overview
+## Therapeutic Areas
 
-A complete R-based biomarker analysis pipeline demonstrating the statistical
-and computational skills required for immunology drug development. The pipeline
-simulates a Phase 2 randomised trial of an FcRn inhibitor in a severe autoimmune
-disease (e.g. generalised Myasthenia Gravis, gMG), and covers multi-omics QC,
-longitudinal modelling, survival analysis, and predictive machine learning —
-all in idiomatic, tidyverse-fluent R.
+| Report | Disease | Mechanism | Primary Biomarker | N |
+|---|---|---|---|---|
+| [Immunology](biomarker_reports/autoimmune_fcrn.qmd) | Generalised Myasthenia Gravis | FcRn Inhibitor (VYVGART-like) | IgG total NPX | 120 |
+| [Oncology](biomarker_reports/oncology_checkpoint.qmd) | NSCLC | PD-1 Checkpoint Inhibitor (nivolumab-like) | TMB | 150 |
+| [Cardiovascular](biomarker_reports/cardiovascular_pcsk9.qmd) | Heterozygous FH | PCSK9 Inhibitor (evolocumab-like) | LDL-C | 200 |
+| [Neurology](biomarker_reports/neurology_alzheimers.qmd) | Early Alzheimer's Disease | Anti-Aβ mAb (lecanemab-like) | p-tau181 | 160 |
 
-```
-biomarker_pipeline_r/
-├── run_pipeline.R              # Single entry point
-├── R/
-│   ├── 01_simulate_data.R      # Trial data generator
-│   ├── 02_multiomics_analysis.R # Module 1: transcriptomics + proteomics
-│   ├── 03_longitudinal_survival.R # Module 2: lme4, Emax, KM, Cox PH
-│   └── 04_ml_pipeline.R        # Module 3: PCA, K-means, glmnet, randomForest
-├── outputs/
-│   ├── 01_multiomics_analysis.png
-│   ├── 02_longitudinal_survival.png
-│   └── 03_ml_pipeline.png
-└── README.md
-```
+All data are **fully simulated** (fixed seeds per report). No patient data are used.
 
 ---
 
-## Simulated Biology
+## Pipeline
 
-| Signal | Implementation |
-|--------|---------------|
-| FcRn-mediated IgG catabolism | Emax-style reduction in active arm |
-| Responder phenotype | ~70% active / ~25% placebo response rate |
-| Transcriptomic signature | 50 baseline DE genes up-regulated in responders |
-| Batch effect | 2 sequencing runs (median-centering correction) |
-| Proteomics (Olink NPX) | 50 proteins × 3 timepoints; IgG1/4/total reduced by FcRn blockade |
-| Time-to-response | Weibull-distributed; active arm responds earlier |
-| Censoring | ~10% dropout |
+Each report runs an identical three-stage analytical pipeline parameterised per therapeutic area:
+
+```
+_analysis_core.qmd          ← shared source (included, not rendered directly)
+├── Step 1 · Multi-Omics
+│     Transcriptomics QC · batch correction · Welch DE (BH-FDR)
+│     Olink NPX proteomics · cross-modal correlation
+├── Step 2 · Longitudinal & Survival
+│     lme4 linear mixed-effects · Emax PD model (nls)
+│     Kaplan–Meier · Cox proportional-hazards
+└── Step 3 · Machine Learning
+      PCA + UMAP · k-means clustering
+      Elastic-net (glmnet) · Random forest · OOB AUROC
+```
+
+TA-specific framing (disease background, biomarker tables, clinical context) lives in each wrapper `.qmd`; all R code lives in `_analysis_core.qmd`.
 
 ---
 
-## Module 1 — Multi-Omics (`R/02_multiomics_analysis.R`)
-
-### Transcriptomics QC
-1. **log₂(count + 1)** normalisation
-2. **Median-centering batch correction** (mirrors `limma::removeBatchEffect`
-   for a 2-batch design — loadable when Bioconductor is available)
-3. **High-variance gene filter** — top 50% by per-gene variance
-4. **PCA outlier detection** — samples > 97.5th percentile Euclidean distance
-
-### Differential Expression
-- Per-gene **Welch t-test** + **Benjamini-Hochberg FDR** (base R, no external dependency)
-- Designed to swap in `limma::eBayes` or `DESeq2` without changing the interface
-- Results: 30 significant baseline DE genes (FDR < 5%)
-
-### Proteomics (Olink NPX)
-- Longitudinal NPX Δ (Wk12 – Wk0) per protein per arm
-- IgG_total: Active –1.79 NPX vs Placebo –0.09 NPX
-
-### Multi-Omics Integration
-- Transcriptomic PCA → Pearson r vs key baseline proteins
-- Production path: `MOFA+`, `mixOmics::DIABLO`, or weighted SNF
-
----
-
-## Module 2 — Longitudinal & Survival (`R/03_longitudinal_survival.R`)
-
-### Linear Mixed-Effects Model (`lme4`)
-```r
-lmer(disease_score ~ week * treatment + (1 + week | patient_id))
-```
-- **week:treatment** interaction = primary drug-effect estimand
-- Result: –1.45 disease-score units drug effect at Week 24
-- `lmerTest` adds Satterthwaite df and p-values when available
-
-### Emax Pharmacodynamic Model (`nls`)
-```
-ΔIgG% = –Emax × week / (EC50 + week)
-```
-- Responders: **Emax = 83%, EC50 = 4.1 weeks**
-- Non-Responders: **Emax = 37%, EC50 = 4.0 weeks**
-
-### Kaplan-Meier + Log-rank (`survival`)
-- Log-rank χ² = 30.1, **p < 0.0001**
-- Active median time-to-response: 14.3 weeks
-
-### Cox Proportional Hazards
-| Covariate | HR | Interpretation |
-|-----------|-----|----------------|
-| treatment | 10.5× | Active arm responds ~10× faster |
-| baseline_igg_z | 1.0× | Minimal effect |
-| latent_biology_z | 2.3× | Biology strongly predicts response |
-
----
-
-## Module 3 — ML Pipeline (`R/04_ml_pipeline.R`)
-
-### Dimensionality Reduction
-- **PCA** (centred + scaled) → n PCs for 90% variance
-- **UMAP** (`umap` package, n_neighbors=15, min_dist=0.1) on top 20 PCs
-  - Falls back to t-SNE (`Rtsne`) or PC1/PC2 if `umap` unavailable
-
-### Patient Clustering
-- **K-means** in top-10 PC space; K via elbow analysis
-- Silhouette score for internal validation
-- Cluster ↔ responder rate as post-hoc validation
-
-### Predictive Biomarker Modelling (Two-Stage)
-**Stage 1 — `glmnet` ElasticNet** (multi-alpha CV grid):
-- Combined matrix: 250 high-variance genes + 50 proteins = 300 features
-- Sparse selection → biologically interpretable panel
-
-**Stage 2 — `randomForest`** (5-fold stratified CV):
-- Class-weighted for responder imbalance
-- **CV AUROC = 0.993 ± 0.016**
-- OOB AUROC = 0.979
-- Feature importance: Mean Decrease in Gini
-
----
-
-## Key Findings (Simulated Data)
+## Project Structure
 
 ```
-Multi-Omics:
-  • 30 baseline DE genes (Welch t-test, FDR < 5%)
-  • IgG_total Δ: Active –1.79 NPX vs Placebo –0.09 NPX (Wk0→12)
-
-Longitudinal & Survival:
-  • lme4 week×treatment: β = –0.06/wk  → –1.45 units at Week 24
-  • Emax: Responders 83% vs Non-Responders 37% IgG reduction
-  • Log-rank p < 0.0001 — active arm responds earlier
-  • Cox treatment HR = 10.5×
-
-ML:
-  • glmnet selected features from 300-feature matrix
-  • randomForest OOB AUROC = 0.979
+biomarker_reports/
+├── _quarto.yml                  # Quarto website project config
+├── _analysis_core.qmd           # Shared parameterised analysis engine
+├── index.qmd                    # Landing page
+├── autoimmune_fcrn.qmd          # Immunology report
+├── oncology_checkpoint.qmd      # Oncology report
+├── cardiovascular_pcsk9.qmd     # Cardiovascular report
+├── neurology_alzheimers.qmd     # Neurology report
+├── render_all.R                 # Render helper
+├── .gitignore
+├── docs/                        # Rendered site (GitHub Pages source)
+└── R/
+    ├── 01_simulate_data.R
+    ├── 02_multiomics_analysis.R
+    ├── 03_longitudinal_survival.R
+    └── 04_ml_pipeline.R
 ```
 
 ---
 
-## Running the Pipeline
+## Quickstart
+
+### 1 — Install dependencies
 
 ```r
-# Install dependencies (one time)
-install.packages(c("ggplot2","dplyr","tidyr","purrr","tibble",
-                   "lme4","lmerTest","survival","broom",
-                   "glmnet","randomForest","cluster",
-                   "patchwork","ggrepel","pheatmap","RColorBrewer",
-                   "pROC","umap"))
+install.packages(c(
+  "dplyr", "tidyr", "purrr", "tibble", "ggplot2", "patchwork",
+  "lme4", "lmerTest", "survival", "broom", "broom.mixed",
+  "glmnet", "randomForest", "cluster", "pROC", "umap",
+  "knitr", "kableExtra", "sessioninfo",
+  "survminer", "forcats", "ggrepel", "pheatmap"
+))
 
-# Run full pipeline (~60–90 seconds)
-Rscript run_pipeline.R
+# Bioconductor
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+BiocManager::install(c("limma", "SummarizedExperiment"))
+```
+
+### 2 — Preview locally
+
+```bash
+cd biomarker_reports
+quarto preview          # opens site at localhost in browser
+```
+
+### 3 — Render and publish
+
+```bash
+quarto render           # builds to docs/
+git add docs/
+git commit -m "Render site"
+git push                # GitHub Pages updates automatically
 ```
 
 ---
 
-## R Package Stack vs argenx JD
+## Adding a New Therapeutic Area
 
-| JD Requirement | R Implementation |
-|----------------|-----------------|
-| Longitudinal models | `lme4::lmer` + `lmerTest` |
-| Survival analysis | `survival::coxph` + KM |
-| Multiplicity control | BH FDR (base `p.adjust`) |
-| High-dimensional DE | Welch t-test; swap to `limma`/`DESeq2` |
-| Dimensionality reduction | `prcomp` + `umap`/`Rtsne` |
-| Clustering | `stats::kmeans` + `cluster::silhouette` |
-| Regularised models | `glmnet` (ElasticNet) |
-| ML for biomarker discovery | `randomForest` + `pROC` |
-| Reproducible code | `set.seed`, modular R functions |
-| Visualisation | `ggplot2` + `patchwork` + `pheatmap` |
-| Dashboarding (prod) | R/Shiny, Posit Connect |
-| Cloud platforms (prod) | Databricks, Snowflake, Posit Team |
+1. Copy any existing TA wrapper (e.g. `autoimmune_fcrn.qmd`) to a new file
+2. Update the `params:` block — `ta`, `disease`, `mechanism`, `primary_biomarker`, `accent_colour`, `seed`, `n_patients`
+3. Replace the Background & Objectives section with disease-specific content
+4. Add the new file to the `render:` list in `_quarto.yml`
+5. Add a navbar entry and index card
+
+No changes to `_analysis_core.qmd` or the `R/` modules are needed.
+
+---
+
+## Tech Stack
+
+| Layer | Tool |
+|---|---|
+| Reporting | [Quarto](https://quarto.org) |
+| Language | R 4.x |
+| Visualisation | ggplot2, patchwork, pheatmap |
+| Statistics | lme4, survival, limma |
+| Machine learning | glmnet, randomForest, pROC, umap |
+| Publishing | GitHub Pages |

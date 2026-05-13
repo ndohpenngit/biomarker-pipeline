@@ -1,1 +1,26 @@
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Quarto build artefacts
+_site/
+_freeze/
+*_files/
+*.knit.md
+*.utf8.md
+figures/
+
+# docs/ is intentionally tracked — it's the GitHub Pages source
+
+# Large output files (commit source, not renders)
+outputs/*.png
+outputs/*.pdf
+outputs/*.html
+
+# OS
+.DS_Store
+Thumbs.db
 /.quarto/

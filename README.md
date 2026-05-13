@@ -99,18 +99,6 @@ git push                # GitHub Pages updates automatically
 
 ---
 
-## Adding a New Therapeutic Area
-
-1. Copy any existing TA wrapper (e.g. `autoimmune_fcrn.qmd`) to a new file
-2. Update the `params:` block — `ta`, `disease`, `mechanism`, `primary_biomarker`, `accent_colour`, `seed`, `n_patients`
-3. Replace the Background & Objectives section with disease-specific content
-4. Add the new file to the `render:` list in `_quarto.yml`
-5. Add a navbar entry and index card
-
-No changes to `_analysis_core.qmd` or the `R/` modules are needed.
-
----
-
 ## Tech Stack
 
 | Layer | Tool |
